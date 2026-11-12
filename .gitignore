@@ -1,0 +1,6 @@
+# Original Mixamo downloads (large; the site uses the compressed models/*.glb)
+models/*.fbx
+# Embedded copy for double-click use only; the hosted site loads the .glb files directly
+models/models.js
+# Local dev helpers
+.claude/

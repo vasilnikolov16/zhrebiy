@@ -1,0 +1,40 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head><body><pre id="o">working…</pre><script type="module">
+// One-off converter: Mixamo FBX (model + clips) -> compact GLB with 1024px textures, saved to models/<x>.glb
+import * as THREE from 'three'; import {FBXLoader} from 'three/addons/loaders/FBXLoader.js'; import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
+const log=t=>{document.getElementById('o').textContent+='\n'+t;};
+const L=new FBXLoader();
+async function texReady(o){
+  const texs=[]; o.traverse(c=>{ if(c.isMesh) [].concat(c.material).forEach(m=>['map','normalMap','specularMap','alphaMap','emissiveMap'].forEach(k=>m[k]&&texs.push([m,k,m[k]]))); });
+  for(let i=0;i<200;i++){ if(texs.every(([,,t])=>t.image&&(t.image.width||t.image.naturalWidth))) break; await new Promise(r=>setTimeout(r,100)); }
+  return texs;
+}
+for(const id of ['a','b']){
+  const model=await L.loadAsync(`/models/${id}_idle.fbx`);
+  const texs=await texReady(model);
+  texs.forEach(([m,k,t])=>{ log(`${id} ${m.name}.${k} ${t.image?.width}x${t.image?.height} transparent=${m.transparent} alphaTest=${m.alphaTest}`); if(!/hair|lash/i.test(m.name)) t.userData.mimeType='image/jpeg'; });
+  // bake hair/eyelash opacity map into the colour map's alpha channel (glTF has no separate alphaMap)
+  const baked=new Map();
+  model.traverse(c=>{ if(!c.isMesh) return; [].concat(c.material).forEach(m=>{
+    if(!m.alphaMap||!m.map) return;
+    if(!baked.has(m.map)){
+      const S=1024, cv=document.createElement('canvas'); cv.width=cv.height=S; const x=cv.getContext('2d');
+      x.drawImage(m.alphaMap.image,0,0,S,S); const a=x.getImageData(0,0,S,S);
+      x.clearRect(0,0,S,S); x.drawImage(m.map.image,0,0,S,S); const d=x.getImageData(0,0,S,S);
+      for(let i=0;i<d.data.length;i+=4) d.data[i+3]=a.data[i];
+      x.putImageData(d,0,0);
+      const t=new THREE.CanvasTexture(cv); t.flipY=m.map.flipY; t.colorSpace=m.map.colorSpace; t.wrapS=m.map.wrapS; t.wrapT=m.map.wrapT; t.userData.mimeType='image/png';
+      baked.set(m.map,t);
+    }
+    m.map=baked.get(m.map); m.alphaMap=null; m.transparent=false; m.alphaTest=.45; m.needsUpdate=true;
+  }); });
+  const clips=[];
+  const idle=model.animations.find(a=>a.tracks.length); idle.name='idle'; clips.push(idle);
+  for(const n of ['walk','cheer']){ const f=await L.loadAsync(`/models/${id}_${n}.fbx`); const c=f.animations.find(a=>a.tracks.length); c.name=n; clips.push(c); }
+  model.animations=[];
+  const glb=await new GLTFExporter().parseAsync(model,{binary:true,animations:clips,maxTextureSize:1024});
+  const r=await fetch(`/save?name=${id}.glb`,{method:'POST',body:glb}); log(id+'.glb → '+(await r.text())+' bytes');
+}
+document.title='done';
+</script></body></html>
